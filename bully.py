@@ -11,6 +11,7 @@ import io
 import os
 import bisect
 from datetime import datetime
+from discord.ui import Button, View
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -26,6 +27,24 @@ FOLDER_ID = '1r95UcnUalduZOEK_cR2bLpKorQfrGKKN'
 
 credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes = SCOPES)
 drive_service = build('drive', 'v3', credentials = credentials)
+
+def is_team_captain():
+    async def predicate(ctx: discord.ApplicationContext):
+        team_captain_role = 738801488134144062
+        if any(getattr(role, "id", None) == team_captain_role for role in ctx.author.roles):
+            print("DEBUG: THIS WORKS")
+            return True
+        
+        await ctx.respond("Only Team Captains may schedule/remove matches.", ephemeral = True)
+        return False
+    return commands.check(predicate)
+
+def is_esports_coord():
+    async def predicate(ctx: discord.ApplicationContext):
+        esports_coord_role = 1235042369670352956
+        if any(getattr(role, "id", None) == esports_coord_role for role in ctx.author.roles):
+            return True
+    return commands.check(predicate)
 
 def validate_future_date(date_str):
     try:
@@ -153,45 +172,61 @@ async def team_autocomplete(ctx: discord.AutocompleteContext):
     return suggestions[:25]
 # Command to schedule a match with auto-completion
 @bot.slash_command(description="Schedule a match")
+@is_team_captain()
 async def book(
     interaction: discord.ApplicationContext,
     game: str = discord.Option(description="Game title (ACTIVE ROSTER)", autocomplete = game_autocomplete),
     team: str = discord.Option(description="Team name", autocomplete = team_autocomplete),
     date: str = discord.Option(description="Date of the match (MM-DD)"),
-    time: int = discord.Option(description="Start time of the match (12-hour format)"),
-    duration: int = discord.Option(description="Duration of the match in hours"),
+    time: int = discord.Option(description="Start time of the match (HH:MM MUST BE 5 OR LATER)"),
+    duration: int = discord.Option(description="Duration of the match in hours (MUST END BEFORE 11)"),
     pcs: int = discord.Option(description="Number of PCs to reserve")
 ):
+    await interaction.response.defer()
     try:
-        time = int(time)
-        duration = int(duration)
+        if ':' not in time:
+            await interaction.followup.send("Time must be in HH:MM format.")
+            return
+
+        hours, minutes = map(int, time.split(':'))
+        if minutes not in [0, 15, 30, 45]:
+            await interaction.followup.send("Minutes must be 0, 15, 30, or 45.")
+            return
+        
+        time_float = hours + minutes / 60.0
+        duration = float(duration)
         pcs = int(pcs)
     except ValueError:
-        await interaction.response.send_message("Invalid input! Time, duration, and PCs must be numbers.")
+        await interaction.followup.send("Invalid input! Time, duration, and PCs must be numbers.")
         return
     if game not in ALLOWED_GAMES:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Invalid Game selected. Please enter an active roster.", ephemeral=True)
         return
     if team not in ALLOWED_TEAMS:
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"Invalid Team selected. Please select from the options.", ephemeral = True)
         return
     if not validate_date(date):
         print(f"Invalid date format provided: {date}")  # Debug print
-        await interaction.respond("Invalid date format. Please input as MM-DD")
+        await interaction.followup.send("Invalid date format. Please input as MM-DD")
         return
     if not validate_future_date(date):
-        await interaction.response.send_message(
+        await interaction.followup.send(
             f"The date must be at least one day in the future.", ephemeral = True)
         return
-    # Validate that the time is 5 or later
-    if time < 5 or time > 10:
-        await interaction.respond("Invalid time! Please choose a time that is 5 or later.")
-        return  # Exit the command if the time is invalid
 
+    # Validate that the time is 5 or later
+    if time_float < 5 or time_float >= 10:
+        await interaction.followup.send("Invalid time! Please choose a time that is 5 or later.")
+        return  # Exit the command if the time is invalid
     # Define the end time for the new reservation
-    end_time = time + duration
+    end_time = time_float + duration
+
+    #THIS DETERMINES THE ENDTIME FOR SCHEDULING
+    if end_time > 11.00:
+        await interaction.followup.send("Endtime must be before 11PM")
+        return
 
     # Check current reservations that overlap with the same date and time range
     total_pcs = 0
@@ -200,7 +235,7 @@ async def book(
             existing_start = match['time']
             existing_end = match['time'] + match['duration']
             # Check for overlap:
-            if (time < existing_end and end_time > existing_start):
+            if (time_float < existing_end and end_time > existing_start):
                 total_pcs += match['pcs']
 
     # Add the new reservation's pcs to the total
@@ -215,7 +250,7 @@ async def book(
         'game': game,
         'team': team,
         'date': date,
-        'time': time,
+        'time': time_float,
         'duration': duration,
         'pcs': pcs
     }
@@ -223,7 +258,9 @@ async def book(
     index = bisect.bisect_left([reservation_sort_key(m) for m in reservation_list], reservation_sort_key(match))
     reservation_list.insert(index, match)# Add match to list or save to a database
     save_reservations(reservation_list)
-    await interaction.respond(f"Match for {game} scheduled on {date} from {time} - {end_time} using {pcs} pcs!")
+    start_time_str = f"{int(time_float)}:{int((time_float % 1) * 60):02}"
+    end_time_str = f"{int(end_time)}:{int((end_time % 1) * 60):02}"
+    await interaction.respond(f"Match for {game} scheduled on {date} from {start_time_str} - {end_time_str} using {pcs} pcs!")
 
 
 
@@ -233,6 +270,7 @@ async def schedule(interaction: discord.ApplicationContext):
     reservation_list = load_reservations()
     if not reservation_list:
         await interaction.respond("No matches scheduled.")
+        return
     else:
 
         embed = discord.Embed(
@@ -241,10 +279,12 @@ async def schedule(interaction: discord.ApplicationContext):
             color = discord.Color.blue()
         )
         for match in reservation_list:
-            time2 = match['time'] + match['duration']
+            start_time_str = f"{int(match['time'])}:{int((match['time'] % 1) * 60):02}"
+            end_time = match['time'] + match['duration']
+            end_time_str = f"{int(end_time)}:{int((end_time % 1) * 60):02}"
             embed.add_field(
                 name = f"{match['game']} ({match['team']})- {match['date']}",
-                value = f"Time: {match['time']} - {time2}\nPCs Reserved: {match['pcs']}",
+                value = f"Time: {start_time_str} - {end_time_str}\nPCs Reserved: {match['pcs']}",
                 inline = False
             )
         await interaction.response.send_message(embed=embed)
@@ -252,22 +292,54 @@ async def schedule(interaction: discord.ApplicationContext):
 
 # Command to remove a match
 @bot.slash_command(description="Remove a scheduled match")
+@is_team_captain()
 async def remove(
     interaction: discord.ApplicationContext,
-    game: str = discord.Option(description="Name of the team"),
+    game: str = discord.Option(description="Name of the team", autocomplete = game_autocomplete), 
+    team: str = discord.Option(description="Team name", autocomplete = team_autocomplete),
     date: str = discord.Option(description="Date of the match (MM-DD format)")
 ):
+    await interaction.response.defer()
+
     reservation_list = load_reservations()
     # Search for the match in the reservation_list
     match_found = False
     for match in reservation_list:
-        if match['game'] == game and match['date'] == date:
+        if match['game'] == game and match['team'] == team and match['date'] == date:
             reservation_list.remove(match)
             save_reservations(reservation_list)
             match_found = True
-            await interaction.response.send_message(f"Match for {game} on {date} has been removed.")
+            await interaction.followup.send(f"Match for {game} on {date} has been removed.")
             break
 
     if not match_found:
-        await interaction.response.send_message(f"No match found for {game} on {date}.")
+        await interaction.followup.send(f"No match found for {game} on {date}.")
+
+@bot.slash_command(description = "Dump the reservation list (DO NOT USE UNLESS SURE)")
+@is_esports_coord()
+async def dump(interaction: discord.ApplicationContext):
+    reservationlist = load_reservations()
+    if not reservation_list:
+        await interaction.respond("No reservations found.", ephemeral = True)
+        return
+    class ConfirmClearView(View):
+        def __init__(self, timeout=30):
+            super().__init__(timeout = timeout)
+            self.value = None
+        @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
+        async def confirm_button(self, button: Button, inter: discord.Interaction):
+            reservation_list.clear()
+            save_reservations(reservation_list)
+            await inter.response.send_message("All reservations have been cleared.", ephemeral = True)
+            self.stop()
+        @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
+        async def cancel_button(self, button: Button, inter: discord.Interaction):
+            await inter.response.send_message("Opeartion canceled.", ephemeral = True)
+            self.stop()
+
+    view = ConfirmClearView()
+    await interaction.respond("Are you absolutely sure you want to clear all reservations? This can not be undone.", view = view)
+
+    await view.wait()
+        
 
