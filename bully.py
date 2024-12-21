@@ -97,7 +97,24 @@ class CalendarView(View):
             if day == 0:
                 self.add_item(Button(label= "--", style = discord.ButtonStyle.gray, disabled =True, row = 1))
             else:
-                self.add_item(DayButton(day, self.month, self.year, row = 1, label = f"{day_abbr[i+5]} {day}"))
+                day_date = datetime(self.year, self.month, day).date()
+                is_disabled = day_date <= today  # Disable for today or past dates
+                # Add button
+                self.add_item(
+                    DayButton(
+                        day=day,
+                        month=self.month,
+                        year=self.year,
+                        row=1,
+                        label=f"{day_abbr[i+5]} {day}"
+                    ) if not is_disabled else
+                    Button(
+                        label=f"{day_abbr[i+5]} {day}",
+                        style=discord.ButtonStyle.gray,
+                        disabled=True,
+                        row=1
+                    )
+                )
         self.add_item(Button(label="<< Previous Week", style=discord.ButtonStyle.primary, row=2, custom_id="prev_week"))
         self.add_item(Button(label="Next Week >>", style=discord.ButtonStyle.primary, row=2, custom_id="next_week"))
         self.add_item(Button(label="<< Previous Month", style=discord.ButtonStyle.secondary, row=3, custom_id="prev_month"))
@@ -466,7 +483,7 @@ class MatchSelectionView(View):
                                                f"Time: **{self.format_time(removed_match['time'])}**", view=None)
 
         # Confirm removal to the user
-        await interaction.response.edit_message(content="Match removed successfully!", view = None)
+        await interaction.response.edit_message(content = "Match removed successfully!", view = None)
 
     @staticmethod
     def format_time(time_float: float):
