@@ -616,9 +616,8 @@ def validate_date(date_str):
 def reservation_sort_key(match):
     return datetime.strptime(match['date'], '%m-%d'), match['time']
 
-
 ALLOWED_GAMES = sorted([
-    "Apex", "CS", "DBD", "Dota", "FGC", "Fortnite", "Halo", "LoL", "NCAA", 
+    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite", "Halo", "Marvel Rivals", "NCAA", "LoL", 
     "OW", "Rainbow6", "RL", "Smash", "Smite", "Valorant"
 ])
 ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
@@ -635,7 +634,6 @@ async def team_autocomplete(ctx: discord.AutocompleteContext):
         team for team in ALLOWED_TEAMS if current in team.lower()]
     return suggestions[:25]
 
-
 @bot.slash_command(description="Schedule a future match")
 @is_team_captain()
 async def book(interaction: discord.ApplicationContext):
@@ -648,7 +646,6 @@ async def book(interaction: discord.ApplicationContext):
     
     view = CalendarView(year = year, month = month, week_index=current_week)
     await interaction.response.send_message(F"**{calendar.month_name[month]} {year}**", view = view, ephemeral=True)
-
 
 # Command to display scheduled reservations
 @bot.slash_command(description="Display scheduled matches")
@@ -675,7 +672,6 @@ async def schedule(interaction: discord.ApplicationContext):
             )
         await interaction.response.send_message(embed=embed)
 
-
 # Command to remove a match
 @bot.slash_command(description="Remove a scheduled match")
 @is_team_captain()
@@ -686,8 +682,6 @@ async def remove(interaction: discord.ApplicationContext):
         return
     view = MatchSelectionView(reservation_list, interaction.user)
     await interaction.respond("Select a match to remove:", view=view, ephemeral = True)
-
-
 
 @bot.slash_command(description = "Dump the reservation list (DO NOT USE UNLESS SURE)")
 @is_esports_coord()
@@ -722,4 +716,3 @@ async def dump(interaction: discord.ApplicationContext):
 
     await view.wait()
         
-
