@@ -466,7 +466,7 @@ class MatchSelectionView(View):
                                                f"Time: **{self.format_time(removed_match['time'])}**", view=None)
 
         # Confirm removal to the user
-        await interaction.response.send_message("Match removed successfully!", ephemeral=True)
+        await interaction.response.edit_message(content="Match removed successfully!", view = None)
 
     @staticmethod
     def format_time(time_float: float):
