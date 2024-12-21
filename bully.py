@@ -12,7 +12,9 @@ import bisect
 from datetime import datetime, timedelta
 import calendar
 from discord.ui import Button, View
+from dotenv import load_dotenv
 
+load_dotenv()
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
@@ -120,8 +122,6 @@ class CalendarView(View):
         self.add_item(Button(label="<< Previous Month", style=discord.ButtonStyle.secondary, row=3, custom_id="prev_month"))
         self.add_item(Button(label="Next Month >>", style=discord.ButtonStyle.secondary, row=3, custom_id="next_month"))
 
-
-
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         return True
     async def on_timeout(self):
@@ -137,8 +137,7 @@ class CalendarView(View):
                     self.month = 12
                     self.year -= 1
                 cal = calendar.monthcalendar(self.year, self.month)
-                self.week_index = len(cal) - 1
-            
+                self.week_index = len(cal) - 1   
         elif action == "next_week":
             self.week_index += 1
             if self.week_index >= len(cal):
@@ -148,7 +147,6 @@ class CalendarView(View):
                     self.year += 1
                 cal = calendar.monthcalendar(self.year, self.month)
                 self.week_index = 0
-
         elif action == "prev_month":
             self.month -= 1
             if self.month < 1:
@@ -388,7 +386,6 @@ class GameSelectionView(View):
             view=team_view,
         )
 
-
 class TeamButton(Button):
     def __init__(self, team_name: str, row: int):
         super().__init__(label = team_name, style=discord.ButtonStyle.primary, row = row)
@@ -481,7 +478,6 @@ class MatchSelectionView(View):
                                                f"Team: **{removed_match['team']}**\n"
                                                f"Date: **{removed_match['date']}**\n"
                                                f"Time: **{self.format_time(removed_match['time'])}**", view=None)
-
         # Confirm removal to the user
         await interaction.response.edit_message(content = "Match removed successfully!", view = None)
 
@@ -490,7 +486,6 @@ class MatchSelectionView(View):
         hours = int(time_float)
         minutes = int((time_float % 1) * 60)
         return f"{hours}:{minutes:02}"
-
 
 def is_team_captain():
     async def predicate(ctx: discord.ApplicationContext):
@@ -565,8 +560,6 @@ def upload_to_drive():
             print("[INFO] Schedule file uploaded to Google Drive.")
     except Exception as e:
         print(f"[ERROR] Failed to upload to Google Drive: {e}")
-
-
 
 def download_from_drive():
     try:
@@ -716,3 +709,4 @@ async def dump(interaction: discord.ApplicationContext):
 
     await view.wait()
         
+bot.run(os.getenv("MY_TOKEN"))
