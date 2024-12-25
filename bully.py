@@ -487,6 +487,213 @@ class MatchSelectionView(View):
         minutes = int((time_float % 1) * 60)
         return f"{hours}:{minutes:02}"
 
+class ScheduleDayButton(Button):
+    def __init__(self, day: int, month: int, year: int, reservations: list, row: int, label: str = None):
+        custom_id = f"schedule_day_{day}_{month}_{year}"
+        self.day = day
+        self.month = month
+        self.year = year
+        self.reservations = reservations
+
+        # Style determination based on reservations
+        total_reserved_pcs = sum(res['pcs'] for res in reservations if res['date'] == f"{month:02}-{day:02}-{year}")
+        style = (
+            discord.ButtonStyle.danger if total_reserved_pcs >= 10 else
+            discord.ButtonStyle.secondary if total_reserved_pcs > 0 else
+            discord.ButtonStyle.success
+        )
+        day_abbr = calendar.day_abbr[datetime(year, month, day).weekday()]
+        super().__init__(
+            label=label if label else f"{day_abbr} {day}",
+            style=style,
+            row=row,
+            custom_id=custom_id
+        )
+
+    async def callback(self, interaction: discord.Interaction):
+        selected_date = f"{self.month:02}-{self.day:02}-{self.year}"
+        day_reservations = [res for res in load_reservations() if res['date'] == selected_date]
+
+        # Show matches for selected date
+        match_view = MatchListView(selected_date, day_reservations)
+
+        if interaction.response.is_done():
+            # If the interaction is already responded to, use followup
+            await interaction.followup.send(
+                content=f"**Matches for {selected_date}:**",
+                view=match_view,
+                ephemeral=True
+            )
+        else:
+            # Otherwise, respond normally
+            await interaction.response.edit_message(
+                content=f"**Matches for {selected_date}:**",
+                view=match_view
+            )
+
+class MatchListView(View):
+    def __init__(self, date: str, matches: list):
+        super().__init__(timeout=300)
+        self.date = date
+        self.matches = matches
+        self.generate_match_buttons()
+
+    def generate_match_buttons(self):
+        self.clear_items()
+        total_pcs = 10
+
+        # Create buttons for matches on the selected date
+        for idx, match in enumerate(sorted(self.matches, key=lambda m: m['time'])):
+            start_time = self.format_time(match['time'])
+            end_time = self.format_time(match['time'] + match['duration'])
+            available_pcs = total_pcs - match['pcs']
+
+            label = f"{match['game']} ({match['team']})\n{start_time} - {end_time} | {match['pcs']} PCs Reserved"
+            button_style = (
+                discord.ButtonStyle.danger if available_pcs <= 0 else
+                discord.ButtonStyle.secondary if available_pcs < total_pcs else
+                discord.ButtonStyle.success
+            )
+
+            self.add_item(
+                Button(label=label, style=button_style, disabled=True)
+            )
+
+    @staticmethod
+    def format_time(time_float: float):
+        hours = int(time_float)
+        minutes = int((time_float % 1) * 60)
+        return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
+
+class ScheduleCalendarView(View):
+    def __init__(self, year: int, month: int, reservations: list, week_index: int = 0):
+        super().__init__(timeout=300)
+        self.year = year
+        self.month = month
+        self.reservations = reservations
+        self.week_index = week_index
+        self.update_week_buttons()
+
+    def update_week_buttons(self):
+        self.clear_items()
+        cal = calendar.monthcalendar(self.year, self.month)
+        day_abbr = calendar.day_abbr
+        self.week_index = max(0, min(self.week_index, len(cal) - 1))
+        today = datetime.now().date()
+
+        # Loop through days of the week to create buttons
+        week = cal[self.week_index]
+        for i, day in enumerate(week[:5]):  # First row: Monday to Friday
+            if day == 0:
+                self.add_item(Button(label="--", style=discord.ButtonStyle.gray, disabled=True, row=0))
+            else:
+                day_date = datetime(self.year, self.month, day).date()
+                day_reservations = [res for res in self.reservations if res['date'] == f"{self.month:02}-{day:02}-{self.year}"]
+                total_reserved_pcs = sum(res['pcs'] for res in day_reservations)
+
+                # Determine style for the button
+                style = (
+                    discord.ButtonStyle.danger if total_reserved_pcs >= 10 else
+                    discord.ButtonStyle.secondary if total_reserved_pcs > 0 else
+                    discord.ButtonStyle.success
+                )
+
+                # Add day button, making past dates clickable
+                self.add_item(
+                    ScheduleDayButton(
+                        day=day,
+                        month=self.month,
+                        year=self.year,
+                        reservations=self.reservations,
+                        row=0,
+                        label=f"{day_abbr[i]} {day}"
+                    )
+                )
+
+        for i, day in enumerate(week[5:]):  # Second row: Saturday and Sunday
+            if day == 0:
+                self.add_item(Button(label="--", style=discord.ButtonStyle.gray, disabled=True, row=1))
+            else:
+                day_date = datetime(self.year, self.month, day).date()
+                day_reservations = [res for res in self.reservations if res['date'] == f"{self.month:02}-{day:02}-{self.year}"]
+                total_reserved_pcs = sum(res['pcs'] for res in day_reservations)
+
+                # Determine style for the button
+                style = (
+                    discord.ButtonStyle.danger if total_reserved_pcs >= 10 else
+                    discord.ButtonStyle.secondary if total_reserved_pcs > 0 else
+                    discord.ButtonStyle.success
+                )
+
+                # Add day button, making past dates clickable
+                self.add_item(
+                    ScheduleDayButton(
+                        day=day,
+                        month=self.month,
+                        year=self.year,
+                        reservations=self.reservations,
+                        row=1,
+                        label=f"{day_abbr[i+5]} {day}"
+                    )
+                )
+
+        # Add navigation buttons
+        self.add_item(Button(label="<< Previous Week", style=discord.ButtonStyle.primary, row=2, custom_id="prev_week"))
+        self.add_item(Button(label="Next Week >>", style=discord.ButtonStyle.primary, row=2, custom_id="next_week"))
+        self.add_item(Button(label="<< Previous Month", style=discord.ButtonStyle.secondary, row=3, custom_id="prev_month"))
+        self.add_item(Button(label="Next Month >>", style=discord.ButtonStyle.secondary, row=3, custom_id="next_month"))
+
+    async def handle_navigation(self, interaction: discord.Interaction, action: str):
+        cal = calendar.monthcalendar(self.year, self.month)
+
+        if action == "prev_week":
+            self.week_index -= 1
+            if self.week_index < 0:
+                self.month -= 1
+                if self.month < 1:
+                    self.month = 12
+                    self.year -= 1
+                cal = calendar.monthcalendar(self.year, self.month)
+                self.week_index = len(cal) - 1
+        elif action == "next_week":
+            self.week_index += 1
+            if self.week_index >= len(cal):
+                self.month += 1
+                if self.month > 12:
+                    self.month = 1
+                    self.year += 1
+                cal = calendar.monthcalendar(self.year, self.month)
+                self.week_index = 0
+        elif action == "prev_month":
+            self.month -= 1
+            if self.month < 1:
+                self.month = 12
+                self.year -= 1
+            self.week_index = 0
+        elif action == "next_month":
+            self.month += 1
+            if self.month > 12:
+                self.month = 1
+                self.year += 1
+            self.week_index = 0
+
+        self.update_week_buttons()
+        await interaction.response.edit_message(
+            content=f"**{calendar.month_name[self.month]} {self.year} - Week {self.week_index + 1}**",
+            view=self
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        action = interaction.data.get("custom_id", "")
+        await self.handle_navigation(interaction, action)
+        return True
+    
+    @staticmethod
+    def format_time(time_float: float):
+        hours = int(time_float)
+        minutes = int((time_float % 1) * 60)
+        return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
+
 def is_team_captain():
     async def predicate(ctx: discord.ApplicationContext):
         team_captain_role = 738801488134144062
@@ -643,27 +850,25 @@ async def book(interaction: discord.ApplicationContext):
 # Command to display scheduled reservations
 @bot.slash_command(description="Display scheduled matches")
 async def schedule(interaction: discord.ApplicationContext):
-    reservation_list = load_reservations()
-    if not reservation_list:
-        await interaction.respond("No matches scheduled.")
-        return
-    else:
+    # Load reservations from the JSON file
+    reservations = load_reservations()
+    
+    # Get today's date and calculate the current week
+    today = datetime.now()
+    year, month = today.year, today.month
+    cal = calendar.monthcalendar(year, month)
+    current_day = today.day
+    current_week = next((index for index, week in enumerate(cal) if current_day in week), 0)
 
-        embed = discord.Embed(
-            title = "Upcoming Reservations",
-            description = "Here are the matches scheduled:",
-            color = discord.Color.blue()
-        )
-        for match in reservation_list:
-            start_time_str = f"{int(match['time'])}:{int((match['time'] % 1) * 60):02}"
-            end_time = match['time'] + match['duration']
-            end_time_str = f"{int(end_time)}:{int((end_time % 1) * 60):02}"
-            embed.add_field(
-                name = f"{match['game']} ({match['team']})- {match['date']}",
-                value = f"Time: {start_time_str} - {end_time_str}\nPCs Reserved: {match['pcs']}",
-                inline = False
-            )
-        await interaction.response.send_message(embed=embed)
+    # Initialize the ScheduleCalendarView with the current date and reservations
+    view = ScheduleCalendarView(year=year, month=month, reservations=reservations, week_index=current_week)
+    
+    # Send the calendar view as a response
+    await interaction.response.send_message(
+        content=f"**{calendar.month_name[month]} {year} - Week {current_week + 1}**",
+        view=view,
+        ephemeral=True
+    )
 
 # Command to remove a match
 @bot.slash_command(description="Remove a scheduled match")
