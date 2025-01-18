@@ -30,6 +30,14 @@ FOLDER_ID = '1r95UcnUalduZOEK_cR2bLpKorQfrGKKN'
 credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes = SCOPES)
 drive_service = build('drive', 'v3', credentials = credentials)
 
+team_captain_role = 738801488134144062
+esports_coord_role = 907864828499083264
+warden_role = 1235042369670352956
+assist_esports_role = 1258127745045626993
+
+ALL_ALLOWED_ROLES = [team_captain_role, esports_coord_role, assist_esports_role, warden_role]
+ADMIN_ROLES = [assist_esports_role, esports_coord_role, warden_role]
+
 class DayButton(Button):
     def __init__(self, day: int, month: int, year: int, row: int, label: str = None):
         custom_id = f"day_{day}_{month}_{year}"
@@ -498,8 +506,6 @@ class ScheduleDayButton(Button):
         # Style determination based on reservations
         total_reserved_pcs = sum(res['pcs'] for res in reservations if res['date'] == f"{month:02}-{day:02}-{year}")
         style = (
-            discord.ButtonStyle.danger if total_reserved_pcs >= 10 else
-            discord.ButtonStyle.secondary if total_reserved_pcs > 0 else
             discord.ButtonStyle.success
         )
         day_abbr = calendar.day_abbr[datetime(year, month, day).weekday()]
@@ -514,22 +520,35 @@ class ScheduleDayButton(Button):
         selected_date = f"{self.month:02}-{self.day:02}-{self.year}"
         day_reservations = [res for res in load_reservations() if res['date'] == selected_date]
 
-        # Show matches for selected date
-        match_view = MatchListView(selected_date, day_reservations)
-
-        if interaction.response.is_done():
-            # If the interaction is already responded to, use followup
-            await interaction.followup.send(
-                content=f"**Matches for {selected_date}:**",
-                view=match_view,
-                ephemeral=True
-            )
+        if not day_reservations:
+            #Display no matches are scheduled
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    content=f"**No current matches for {selected_date}**",
+                    ephemeral=True
+                )
+            else:
+                await interaction.response.send_message(
+                    content=f"**No current matches for {selected_date}**",
+                    ephemeral=True
+                )
         else:
-            # Otherwise, respond normally
-            await interaction.response.edit_message(
-                content=f"**Matches for {selected_date}:**",
-                view=match_view
-            )
+            # Show matches for selected date
+            match_view = MatchListView(selected_date, day_reservations)
+
+            if interaction.response.is_done():
+                # If the interaction is already responded to, use followup
+                await interaction.followup.send(
+                    content=f"**Matches for {selected_date}:**",
+                    view=match_view,
+                    ephemeral=True
+                )
+            else:
+                # Otherwise, respond normally
+                await interaction.response.edit_message(
+                    content=f"**Matches for {selected_date}:**",
+                    view=match_view
+                )
 
 class MatchListView(View):
     def __init__(self, date: str, matches: list):
@@ -694,22 +713,64 @@ class ScheduleCalendarView(View):
         minutes = int((time_float % 1) * 60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
 
-def is_team_captain():
-    async def predicate(ctx: discord.ApplicationContext):
-        team_captain_role = 738801488134144062
-        if any(getattr(role, "id", None) == team_captain_role for role in ctx.author.roles):
-            print("DEBUG: THIS WORKS")
-            return True
+class PagingRemoveView(View):
+    def __init__(self, matches: list, remover: discord.Member, page: int = 0, page_size: int = 5):
+        super().__init__(timeout=300)
+        self.matches = matches
+        self.remover = remover
+        self.page = page
+        self.page_size = page_size
+        self.generate_match_buttons()
+
+    def generate_match_buttons(self):
+        self.clear_items()
+        start = self.page * self.page_size
+        end = start + self.page_size
+        current_matches = self.matches[start:end]
+
+        for idx, match in enumerate(current_matches):
+            self.add_item(MatchButton(match, start + idx))
+
+        #Navigation buttons if there are enough matches to navigate
+        if self.page > 0:
+            self.add_item(Button(label=" << Previous", style = discord.ButtonStyle.primary, row = 1, custom_id="prev_page"))
+        if end < len(self.matches):
+            self.add_item(Button(label="Next >>", style = discord.ButtonStyle.primary, row=1, custom_id="next_page"))
+
+    async def handle_nav(self, interaction: discord.Interaction, action: str):
+        if action == "prev_page":
+            self.page -= 1
+        elif action == "next_page":
+            self.page += 1
         
-        await ctx.respond("Only Team Captains may schedule/remove matches.", ephemeral = True)
+        self.generate_match_buttons()
+        await interaction.response.edit_message(
+            content = "Select a match to remove:",
+            view = self,
+        )
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        action = interaction.data.get("custom_id", "")
+        await self.handle_nav(interaction, action)
+        return True
+
+def check_perm(allowed_roles):
+    async def predicate(ctx: discord.ApplicationContext):
+        user_roles = [role.id for role in ctx.author.roles]
+        if any(role in allowed_roles for role in user_roles):
+            print("User has permission")
+            return True
+        await ctx.respond("You do not have permission to use this command.", ephemeral = True)
         return False
     return commands.check(predicate)
-
-def is_esports_coord():
+def is_admin(allowed_roles):
     async def predicate(ctx: discord.ApplicationContext):
-        esports_coord_role = 1235042369670352956
-        if any(getattr(role, "id", None) == esports_coord_role for role in ctx.author.roles):
+        user_roles = [role.id for role in ctx.author.roles]
+        if any(role in allowed_roles for role in user_roles):
+            print("User has admin permission")
             return True
+        await ctx.respond("You do not have permission to use this command.", ephemeral = True)
+        return False
     return commands.check(predicate)
 
 def validate_future_date(date_str):
@@ -835,7 +896,7 @@ async def team_autocomplete(ctx: discord.AutocompleteContext):
     return suggestions[:25]
 
 @bot.slash_command(description="Schedule a future match")
-@is_team_captain()
+@check_perm(ALL_ALLOWED_ROLES)
 async def book(interaction: discord.ApplicationContext):
     today = datetime.now()
     year, month = today.year, today.month
@@ -872,17 +933,24 @@ async def schedule(interaction: discord.ApplicationContext):
 
 # Command to remove a match
 @bot.slash_command(description="Remove a scheduled match")
-@is_team_captain()
+@check_perm(ALL_ALLOWED_ROLES)
 async def remove(interaction: discord.ApplicationContext):
-    reservation_list = load_reservations()
+    #Filter reservations for future matches
+    today = datetime.now().date()
+    reservation_list = [
+        res for res in load_reservations()
+        if datetime.strptime(res["date"], "%m-%d-%Y").date() >= today
+    ]
+
     if not reservation_list:
-        await interaction.respond("No matches scheduled.", ephemeral = True)
+        await interaction.respond("No matches scheduled", ephemeral = True)
         return
-    view = MatchSelectionView(reservation_list, interaction.user)
-    await interaction.respond("Select a match to remove:", view=view, ephemeral = True)
+    
+    view = PagingRemoveView(reservation_list, interaction.user)
+    await interaction.respond("Select a match to remove:", view= view, ephemeral = True)
 
 @bot.slash_command(description = "Dump the reservation list (DO NOT USE UNLESS SURE)")
-@is_esports_coord()
+@is_admin(ADMIN_ROLES)
 async def dump(interaction: discord.ApplicationContext):
     reservation_list = load_reservations()
     if not reservation_list:
@@ -906,12 +974,46 @@ async def dump(interaction: discord.ApplicationContext):
             self.stop()
         @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
         async def cancel_button(self, button: Button, inter: discord.Interaction):
-            await inter.response.send_message("Opeartion canceled.", ephemeral = True)
+            await inter.response.send_message("Operation canceled.", ephemeral = True)
             self.stop()
 
     view = ConfirmClearView()
     await interaction.respond("Are you absolutely sure you want to clear all reservations? This can not be undone.", view = view, ephemeral = True)
 
     await view.wait()
-        
+
+@bot.slash_command(description = "Display author and information related to the bot.")
+async def credits(interaction: discord.ApplicationContext):
+    embed = discord.Embed(
+        title = "Bot Credits/Info",
+        description = "More information about the bot and its creator.",
+        color = discord.Color.blue()
+    )
+    embed.add_field(
+        name = "Author",
+        value = "Colin Klein\nMuffinOnLoL",
+        inline=False
+    )
+    embed.add_field(
+        name = "How the bot works",
+        value = (
+            "This bot was created in order to schedule and manage reservations for the Esports lab.\n"
+            "It utilizes a few different commands such as:\n"
+            "- /book Booking matches\n"
+            "- /remove Removing matches\n"
+            "- /schedule Displaying scheduling\n"
+            "- /dump Emptying the list of matches\n"
+            "- /credits Displays the current information\n"
+            "Currently the bot writes the information to a local dictionary using Python.\n"
+            "It then pushes that data to a json file that is then pushed to a google drive folder.\n"
+            "This allows the information to be retrieved from numerous recpients and for the bot itself.\n"
+            "Lastly, it features an interactive scheduling system to simplify the booking process."
+        ),
+        inline = False
+    )
+    embed.set_footer(
+        text="Thank you for using my bot! Please reach out to Muffin for any questions, concerns, or feedback!"
+    )
+    await interaction.response.send_message(embed = embed, ephemeral = True)
+
 bot.run(os.getenv("MY_TOKEN"))
