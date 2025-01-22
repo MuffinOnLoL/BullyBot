@@ -830,7 +830,7 @@ class GameRosterButton(Button):
             member_list = ", ".join(members) if members else "No members on this roster"
             roster_message += f"**{color}**: {member_list}\n"
 
-        await interaction.response.send_message(content=roster_message)
+        await interaction.response.send_message(content=roster_message, ephemeral=True)
 
 def check_perm(allowed_roles):
     async def predicate(ctx: discord.ApplicationContext):
@@ -956,8 +956,8 @@ def reservation_sort_key(match):
     return datetime.strptime(match['date'], '%m-%d'), match['time']
 
 ALLOWED_GAMES = sorted([
-    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite", "Halo", "Marvel Rivals", "NCAA", "LoL", 
-    "OW", "Rainbow6", "RL", "Smash", "Smite", "Valorant"
+    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite Build", "Fortnite Zero Build" "Halo", "Marvel Rivals", "NCAA", "LoL", 
+    "OW", "R6", "RL", "Smash", "Smite", "Valorant", "Splatoon"
 ])
 ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
 
