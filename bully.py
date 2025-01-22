@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 intents = discord.Intents.default()
+intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 
@@ -754,6 +755,83 @@ class PagingRemoveView(View):
         await self.handle_nav(interaction, action)
         return True
 
+class GameRosterView(View):
+    def __init__(self, allowed_games):
+        super().__init__(timeout=300)
+        self.allowed_games = allowed_games
+        self.generate_game_buttons()
+
+    def generate_game_buttons(self):
+        self.clear_items()
+        for game in self.allowed_games:
+            self.add_item(GameRosterButton(game))
+
+class GameRosterButton(Button):
+    def __init__(self, game_name):
+        super().__init__(label = game_name, style=discord.ButtonStyle.primary)
+        self.game_name = game_name
+
+    async def callback(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        team_colors = ALLOWED_TEAMS
+        staff_role_name = f"{self.game_name} Staff"
+        coach_role_name = f"{self.game_name} Coach"
+
+        roster_data = {"Staff": [], "Coach": [], "Teams": {color: [] for color in team_colors}}
+
+        staff_role = discord.utils.get(guild.roles, name = staff_role_name)
+        coach_role = discord.utils.get(guild.roles, name = coach_role_name)
+
+        if staff_role:
+            roster_data["Staff"] = [
+                member.display_name for member in guild.members if staff_role in member.roles
+            ]
+
+        if coach_role:
+            roster_data["Coach"] = [
+                member.display_name for member in guild.members if coach_role in member.roles
+            ]
+        
+        for color in team_colors:
+            role_name = f"{self.game_name} {color}"
+            role = discord.utils.get(guild.roles, name=role_name)
+
+            if role:
+                roster_data["Teams"][color] = [
+                    member.display_name for member in guild.members if role in member.roles
+                ]
+            else:
+                roster_data[color] = []     
+
+        #Search all users for corresponding roles
+        for color in team_colors:
+            role_name = f"{self.game_name} {color}"
+            role = discord.utils.get(guild.roles, name = role_name)
+            if role:
+                roster_data[color] = [
+                    member.display_name for member in guild.members if role in member.roles
+                ]
+            else:
+                roster_data[color] = []
+
+        #Format message
+        roster_message = f"**Roster for {self.game_name}:**\n"
+
+        # Add Game Coaches
+        coach_list = ", ".join(roster_data["Coach"]) if roster_data["Coach"] else "No coaches assigned"
+        roster_message += f"**Game Coaches**: {coach_list}\n"
+
+        # Add Game Staff
+        staff_list = ", ".join(roster_data["Staff"]) if roster_data["Staff"] else "No staff assigned"
+        roster_message += f"**Game Staff**: {staff_list}\n\n"
+
+
+        for color, members in roster_data["Teams"].items():
+            member_list = ", ".join(members) if members else "No members on this roster"
+            roster_message += f"**{color}**: {member_list}\n"
+
+        await interaction.response.send_message(content=roster_message)
+
 def check_perm(allowed_roles):
     async def predicate(ctx: discord.ApplicationContext):
         user_roles = [role.id for role in ctx.author.roles]
@@ -1015,5 +1093,128 @@ async def credits(interaction: discord.ApplicationContext):
         text="Thank you for using my bot! Please reach out to Muffin for any questions, concerns, or feedback!"
     )
     await interaction.response.send_message(embed = embed, ephemeral = True)
+
+@bot.slash_command(description = "Display a current roster for a game")
+async def rosters(interaction: discord.ApplicationContext):
+    view = GameRosterView(allowed_games=ALLOWED_GAMES)
+    await interaction.response.send_message("Select a game to view its roster", view = view, ephemeral = True)
+
+@bot.slash_command(description = "Lists all current Exec/Board positions")
+async def staff(interaction: discord.ApplicationContext):
+
+    #THESE ARE CURRENT ROLES THAT ARE ACTIVE IN MSU ESPORTS 24-25
+    exec_roles = [
+        "President", "Vice President", "Secretary", "Treasurer", "Esports Director"
+    ]
+    board_roles = [
+        "Assistant Esports Director", "Event Director", "Media Director", "Outreach Director", "Stream Director"
+    ]
+    ward_role = "Warden"
+    head_mod_role = "Head Moderator"
+    moderator_role = "Moderator"
+    media_role = "Media Team"
+    tryout_coord = "Tryouts Coordinator"
+    event_comm_role = "Event Committee"
+    tabling_crew_role = "Tabling Crew"
+    stream_team_role = "Stream Team"
+
+    guild = interaction.guild
+    await guild.fetch_members().flatten()
+
+    staff_data = {
+        "Executive Roles": {role: [] for role in exec_roles},
+        "Board Roles": {role: [] for role in board_roles},
+        "Media Team": [],
+        "Event Committee": [],
+        "Stream Team": [],
+        "Tabling Crew": [],
+        "Tryout Coords": [],
+        "Warden": [],
+        "Head Moderators": [],
+        "Moderators": []
+    }
+
+    for role_name in exec_roles + board_roles + [media_role] + [tryout_coord] + [ward_role] + [head_mod_role] + [moderator_role]:
+        role = discord.utils.get(guild.roles, name = role_name)
+        if role:
+            for member in guild.members:
+                if role in member.roles:
+                    if role_name in exec_roles:
+                        staff_data["Executive Roles"][role_name].append(member.display_name)
+                    elif role_name in board_roles:
+                        staff_data["Board Roles"][role_name].append(member.display_name)
+                    elif role_name == media_role:
+                        staff_data["Media Team"].append(member.display_name)
+                    elif role_name == tryout_coord:
+                        staff_data["Tryout Coords"].append(member.display_name)
+                    elif role_name == ward_role:
+                        staff_data["Warden"].append(member.display_name)
+                    elif role_name == tabling_crew_role:
+                        staff_data["Tabling Crew"].append(member.display_name)
+                    elif role_name == stream_team_role:
+                        staff_data["Stream Team"].append(member.display_name)
+                    elif role_name == event_comm_role:
+                        staff_data["Event Committee"].append(member.display_name)
+                    elif role_name == head_mod_role:
+                        staff_data["Head Moderators"].append(member.display_name)
+                    elif role_name == moderator_role:
+                        staff_data["Moderators"].append(member.display_name)
+
+    #Format staff list
+    staff_message = "**Staff Members**\n\n"
+
+    staff_message += "**Executive Committee**\n"
+    for role, members in staff_data["Executive Roles"].items():
+        member_list = ", ".join(members) if members else "No Members"
+        staff_message += f"**{role}**: {member_list}\n"
+
+    # Add Board Roles
+    staff_message += "\n**Board of Directors**\n"
+    for role, members in staff_data["Board Roles"].items():
+        member_list = ", ".join(members) if members else "No Members"
+        staff_message += f"**{role}**: {member_list}\n"
+
+    # Add Media Team (if any exist)
+    if staff_data["Media Team"]:
+        staff_message += "\n**Media Team**\n"
+        staff_message += ", ".join(staff_data["Media Team"])
+    
+    # Add Tabling Team (if any exist)
+    if staff_data["Tabling Crew"]:
+        staff_message += "\n**Tabling Crew**\n"
+        staff_message += ", ".join(staff_data["Tabling Crew"])
+
+    # Add Stream Team (if any exist)
+    if staff_data["Stream Team"]:
+        staff_message += "\n**Media Team**\n"
+        staff_message += ", ".join(staff_data["Media Team"])
+
+    # Add Event Committee (if any exist)
+    if staff_data["Event Committee"]:
+        staff_message += "\n**Event Committee**\n"
+        staff_message += ", ".join(staff_data["Event Committee"])
+
+    # Add Tryout Coords (if any exist)
+    if staff_data["Tryout Coords"]:
+        staff_message += "\n**Tryout Coordinators**\n"
+        staff_message += ", ".join(staff_data["Tryout Coords"])
+    
+    # Add Wardens (if any exist)
+    if staff_data["Warden"]:
+        staff_message += "\n**Warden**\n"
+        staff_message += ", ".join(staff_data["Warden"])
+    
+    # Add Head Mods (if any exist)
+    if staff_data["Head Moderators"]:
+        staff_message += "\n**Head Moderators**\n"
+        staff_message += ", ".join(staff_data["Head Moderators"])
+
+    # Add Moderators (if any exist)
+    if staff_data["Moderators"]:
+        staff_message += "\n**Moderators**\n"
+        staff_message += ", ".join(staff_data["Moderators"])
+
+    # Send the response
+    await interaction.response.send_message(content=staff_message)
 
 bot.run(os.getenv("MY_TOKEN"))
