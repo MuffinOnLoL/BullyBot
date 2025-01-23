@@ -19,6 +19,8 @@ intents = discord.Intents.default()
 intents.members = True
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
+#Mumbo jumbo just pulls libraries and initializes the bot perms/commands
+
 
 #Storage File:
 SCHEDULE_FILE = "schedule.json"
@@ -28,16 +30,27 @@ SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'bullybot-442505-5ec4ee963848.json'
 FOLDER_ID = '1r95UcnUalduZOEK_cR2bLpKorQfrGKKN'
 
+#These pull the credentials from the corresponding file DO NOT TOUCH THESE
 credentials = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes = SCOPES)
 drive_service = build('drive', 'v3', credentials = credentials)
 
+#These are the corresponding role numbers in the MSU Esports Server ALSO DONT TOUCH
 team_captain_role = 738801488134144062
 esports_coord_role = 907864828499083264
 warden_role = 1235042369670352956
 assist_esports_role = 1258127745045626993
 
+#Put role permissions here for command access. All allowed = commands such as book and remove Admin = dump command
 ALL_ALLOWED_ROLES = [team_captain_role, esports_coord_role, assist_esports_role, warden_role]
-ADMIN_ROLES = [assist_esports_role, esports_coord_role, warden_role]
+ADMIN_ROLES = [esports_coord_role, warden_role]
+
+#This lists the current rosters of games as well as the max amount of teams per game. List appropriate games/colors below
+ALLOWED_GAMES = sorted([
+    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite Build", "Fortnite Zero Build" "Halo", "Marvel Rivals", "EACFB 25", "LoL", 
+    "Overwatch", "R6", "Rocket League", "Smash Dawgs", "Smite", "Valorant", "Splatoon"
+])
+ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
+
 
 class DayButton(Button):
     def __init__(self, day: int, month: int, year: int, row: int, label: str = None):
@@ -832,6 +845,88 @@ class GameRosterButton(Button):
 
         await interaction.response.send_message(content=roster_message, ephemeral=True)
 
+class StaffPagingView(View):
+    def __init__(self, staff_data):
+        super().__init__(timeout = 300)
+        self.staff_data = staff_data
+        self.page = 0
+        self.generate_page()
+
+    def generate_page(self):
+        self.clear_items()
+        self.add_item(Button(label = "<< Previous", style = discord.ButtonStyle.primary, custom_id="prev_staff_page", disabled = (self.page==0)))
+        self.add_item(Button(label="Next >>", style=discord.ButtonStyle.primary, custom_id="next_staff_page", disabled=(self.page == 1)))
+
+    async def handle_paging(self, interaction:discord.Interaction, action: str):
+        if action == "prev_staff_page":
+            self.page -= 1
+        elif action == "next_staff_page":
+            self.page += 1
+        
+        staff_message = "**Staff Members**\n\n"
+
+        if self.page == 0:
+            #This is the first page with exec/board/warden
+            staff_message += "**Executive Committee**\n"
+            for role, members in self.staff_data["Executive Roles"].items():
+                member_list = ", ".join(members) if members else "No Members"
+                staff_message += f"**{role}**: {member_list}\n"
+
+            staff_message += "**\nBoard of Directors**\n"
+            for role, members in self.staff_data["Board Roles"].items():
+                member_list = ", ".join(members) if members else "No Members"
+                staff_message += f"**{role}**: {member_list}\n"
+
+            warden_list = ", ".join(self.staff_data["Warden"]) if self.staff_data["Warden"] else "No Wardens"
+            staff_message += f"\n**Warden**: {warden_list}\n"
+
+        elif self.page == 1:
+            #These are the remaining roles not listed above
+            if self.staff_data["Media Team"]:
+                staff_message += "**Media Team**\n"
+                staff_message += ", ".join(self.staff_data["Media Team"]) + "\n"
+
+            if self.staff_data["Event Committee"]:
+                staff_message += "\n**Event Committee**\n"
+                staff_message += ", ".join(self.staff_data["Event Committee"]) + "\n"
+
+            if self.staff_data["Stream Team"]:
+                staff_message += "\n**Stream Team**\n"
+                staff_message += ", ".join(self.staff_data["Stream Team"]) + "\n"
+
+            if self.staff_data["Tabling Crew"]:
+                staff_message += "\n**Tabling Crew**\n"
+                staff_message += ", ".join(self.staff_data["Tabling Crew"]) + "\n"
+
+            if self.staff_data["Tryout Coords"]:
+                staff_message += "\n**Tryout Coordinators**\n"
+                staff_message += ", ".join(self.staff_data["Tryout Coords"]) + "\n"
+
+            if self.staff_data["Head Moderators"]:
+                staff_message += "\n**Head Moderators**\n"
+                staff_message += ", ".join(self.staff_data["Head Moderators"]) + "\n"
+
+            if self.staff_data["Moderators"]:
+                staff_message += "\n**Moderators**\n"
+                staff_message += ", ".join(self.staff_data["Moderators"]) + "\n"
+
+        self.generate_page()
+        await interaction.response.edit_message(content=staff_message, view=self)            
+
+    @discord.ui.button(label="<< Previous", style=discord.ButtonStyle.primary, row=1)
+    async def previous_button(self, button: Button, interaction: discord.Interaction):
+        await self.handle_paging(interaction, "prev_staff_page")
+
+    @discord.ui.button(label="Next >>", style=discord.ButtonStyle.primary, row=1)
+    async def next_button(self, button: Button, interaction: discord.Interaction):
+        await self.handle_paging(interaction, "next_staff_page")
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        print(f"INTERACTION ReCEIVED {interaction.data['custom_id']}")
+        action = interaction.data["custom_id"]
+        await self.handle_paging(interaction,action)
+        return True
+
 def check_perm(allowed_roles):
     async def predicate(ctx: discord.ApplicationContext):
         user_roles = [role.id for role in ctx.author.roles]
@@ -877,6 +972,7 @@ def load_reservations():
         print("[INFO] Schedule file not found locally. Attempting to download from Google Drive")
         return download_from_drive()
 
+#Save/push reservations to JSON file
 def save_reservations(reservations):
     try:
         with open(SCHEDULE_FILE, "w") as file:
@@ -887,6 +983,7 @@ def save_reservations(reservations):
     except Exception as e:
         print(f"[ERROR] Failed to write to schedule.json: {e}")
 
+#Push the local JSON to JSON located on google drive
 def upload_to_drive():
     try:
         media = MediaFileUpload(SCHEDULE_FILE, mimetype = 'application/json')
@@ -907,6 +1004,7 @@ def upload_to_drive():
     except Exception as e:
         print(f"[ERROR] Failed to upload to Google Drive: {e}")
 
+#Pull the google drive JSON to local JSON
 def download_from_drive():
     try:
         results = drive_service.files().list(
@@ -936,12 +1034,15 @@ def download_from_drive():
         print(f"[ERROR] Failed to download from Google Drive: {e}")
         return []
 
+#Load the current list from local JSON
 reservation_list = load_reservations()
 
+#Simply announce that the bot is correctly running
 @bot.event
 async def on_ready():
     print(f'Bot {bot.user} is ready!')
 
+#Parse the date to determine it is a valid time (DEPRECATED/UNUSED)
 def validate_date(date_str):
     # Regular expression to match MM-DD format
     pattern = r'^\d{2}-\d{2}$'
@@ -951,31 +1052,30 @@ def validate_date(date_str):
         if 1 <= month <= 12 and 1 <= day <= 31:
             return True
     return False
-    
+
+#Sort matches appropriately on JSON in calendar format    
 def reservation_sort_key(match):
     return datetime.strptime(match['date'], '%m-%d'), match['time']
 
-ALLOWED_GAMES = sorted([
-    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite Build", "Fortnite Zero Build" "Halo", "Marvel Rivals", "NCAA", "LoL", 
-    "OW", "R6", "RL", "Smash", "Smite", "Valorant", "Splatoon"
-])
-ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
-
+#Autofill game/suggest game while typing (DEPRECATED/UNUSED)
 async def game_autocomplete(ctx: discord.AutocompleteContext):
     current = ctx.value.lower() if ctx.value else ""
     suggestions = [
         game for game in ALLOWED_GAMES if current in game.lower()]
     return (suggestions[:25])
 
+#Autofill team/suggest team while typing (DEPRECATED/UNUSED)
 async def team_autocomplete(ctx: discord.AutocompleteContext):
     current = ctx.value.lower() if ctx.value else ""
     suggestions = [
         team for team in ALLOWED_TEAMS if current in team.lower()]
     return suggestions[:25]
 
+#Books a match and pushes to the JSON. Only accessible by ALL_ALLOWED_ROLES
 @bot.slash_command(description="Schedule a future match")
 @check_perm(ALL_ALLOWED_ROLES)
 async def book(interaction: discord.ApplicationContext):
+    #Pulls the current time as to prevent scheduling the day of and in the past
     today = datetime.now()
     year, month = today.year, today.month
     cal = calendar.monthcalendar(year, month)
@@ -983,7 +1083,9 @@ async def book(interaction: discord.ApplicationContext):
     current_week = next(
         (index for index, week in enumerate(cal) if currentday in week), 0)
     
+    #Creates a calendar view for simple/clear selection 
     view = CalendarView(year = year, month = month, week_index=current_week)
+    #Send match calendar as a response
     await interaction.response.send_message(F"**{calendar.month_name[month]} {year}**", view = view, ephemeral=True)
 
 # Command to display scheduled reservations
@@ -1019,27 +1121,32 @@ async def remove(interaction: discord.ApplicationContext):
         res for res in load_reservations()
         if datetime.strptime(res["date"], "%m-%d-%Y").date() >= today
     ]
-
+    #If no future matches display an error
     if not reservation_list:
         await interaction.respond("No matches scheduled", ephemeral = True)
         return
     
+    #Display the view of current future matches otherwise
     view = PagingRemoveView(reservation_list, interaction.user)
     await interaction.respond("Select a match to remove:", view= view, ephemeral = True)
 
+#Dumps the current contents of the local/drive JSON completely. Only accessible by ADMIN_ROLES and must be used carefully
 @bot.slash_command(description = "Dump the reservation list (DO NOT USE UNLESS SURE)")
 @is_admin(ADMIN_ROLES)
 async def dump(interaction: discord.ApplicationContext):
+    #Pull reservations and display error if none are found
     reservation_list = load_reservations()
     if not reservation_list:
         await interaction.respond("No reservations found.", ephemeral = True)
         return
+    #Display a button that the user must confirm before dumping
     class ConfirmClearView(View):
         def __init__(self, timeout=30):
             super().__init__(timeout = timeout)
             self.value = None
         @discord.ui.button(label="Confirm", style=discord.ButtonStyle.danger)
         async def confirm_button(self, button: Button, inter: discord.Interaction):
+            #Once it is confirmed, clear list and send a confirmation message with who dumped the list
             reservation_list.clear()
             save_reservations(reservation_list)
             await inter.channel.send(
@@ -1048,30 +1155,37 @@ async def dump(interaction: discord.ApplicationContext):
                 )
             )
 
+            #Display that the list has been completely cleared to user
             await inter.response.send_message("All reservations have been cleared.", ephemeral = True)
             self.stop()
+        #Create a button to cancel the clear if needed
         @discord.ui.button(label="Cancel", style=discord.ButtonStyle.secondary)
         async def cancel_button(self, button: Button, inter: discord.Interaction):
+            #Alert user the operation was canceled
             await inter.response.send_message("Operation canceled.", ephemeral = True)
             self.stop()
 
+    #Display to the user that they must accept the clear and display confirm/cancel buttons
     view = ConfirmClearView()
     await interaction.respond("Are you absolutely sure you want to clear all reservations? This can not be undone.", view = view, ephemeral = True)
-
     await view.wait()
 
+#A custom command that displays information about *moi* and some extra info about commands available
 @bot.slash_command(description = "Display author and information related to the bot.")
 async def credits(interaction: discord.ApplicationContext):
+    #Creates an embed to send in appropriate chat
     embed = discord.Embed(
         title = "Bot Credits/Info",
         description = "More information about the bot and its creator.",
         color = discord.Color.blue()
     )
+    #Add a field that displays author info/name
     embed.add_field(
         name = "Author",
         value = "Colin Klein\nMuffinOnLoL",
         inline=False
     )
+    #Display a paragraph detailing the commands and how the bot works in code
     embed.add_field(
         name = "How the bot works",
         value = (
@@ -1081,6 +1195,8 @@ async def credits(interaction: discord.ApplicationContext):
             "- /remove Removing matches\n"
             "- /schedule Displaying scheduling\n"
             "- /dump Emptying the list of matches\n"
+            "- /rosters Displays the current rosters\n"
+            "- /staff Displays the current staff\n"
             "- /credits Displays the current information\n"
             "Currently the bot writes the information to a local dictionary using Python.\n"
             "It then pushes that data to a json file that is then pushed to a google drive folder.\n"
@@ -1089,20 +1205,25 @@ async def credits(interaction: discord.ApplicationContext):
         ),
         inline = False
     )
+    #Then adds a thank you note for those who view the command
     embed.set_footer(
         text="Thank you for using my bot! Please reach out to Muffin for any questions, concerns, or feedback!"
     )
     await interaction.response.send_message(embed = embed, ephemeral = True)
 
+#Display the current rosters at MSU Esprots
 @bot.slash_command(description = "Display a current roster for a game")
 async def rosters(interaction: discord.ApplicationContext):
+    #Displays all current titles available for the user to select
     view = GameRosterView(allowed_games=ALLOWED_GAMES)
     await interaction.response.send_message("Select a game to view its roster", view = view, ephemeral = True)
 
-@bot.slash_command(description = "Lists all current Exec/Board positions")
+#Lists all current active staff at MSU Esports
+@bot.slash_command(description = "Lists all current staff positions")
 async def staff(interaction: discord.ApplicationContext):
 
     #THESE ARE CURRENT ROLES THAT ARE ACTIVE IN MSU ESPORTS 24-25
+    #Change/add these when needed
     exec_roles = [
         "President", "Vice President", "Secretary", "Treasurer", "Esports Director"
     ]
@@ -1118,9 +1239,11 @@ async def staff(interaction: discord.ApplicationContext):
     tabling_crew_role = "Tabling Crew"
     stream_team_role = "Stream Team"
 
+    #Pull the current user base inside server
     guild = interaction.guild
     await guild.fetch_members().flatten()
 
+    #Create a dictionary to store all users with the following roles
     staff_data = {
         "Executive Roles": {role: [] for role in exec_roles},
         "Board Roles": {role: [] for role in board_roles},
@@ -1134,7 +1257,8 @@ async def staff(interaction: discord.ApplicationContext):
         "Moderators": []
     }
 
-    for role_name in exec_roles + board_roles + [media_role] + [tryout_coord] + [ward_role] + [head_mod_role] + [moderator_role]:
+    #For each of the folloiwng roles, if a certain role add to the correct dictionary key
+    for role_name in exec_roles + board_roles + [media_role] + [tryout_coord] + [ward_role] + [tabling_crew_role] + [stream_team_role] + [event_comm_role] + [head_mod_role] + [moderator_role]:
         role = discord.utils.get(guild.roles, name = role_name)
         if role:
             for member in guild.members:
@@ -1160,9 +1284,10 @@ async def staff(interaction: discord.ApplicationContext):
                     elif role_name == moderator_role:
                         staff_data["Moderators"].append(member.display_name)
 
+    view = StaffPagingView(staff_data)
+
     #Format staff list
     staff_message = "**Staff Members**\n\n"
-
     staff_message += "**Executive Committee**\n"
     for role, members in staff_data["Executive Roles"].items():
         member_list = ", ".join(members) if members else "No Members"
@@ -1174,47 +1299,11 @@ async def staff(interaction: discord.ApplicationContext):
         member_list = ", ".join(members) if members else "No Members"
         staff_message += f"**{role}**: {member_list}\n"
 
-    # Add Media Team (if any exist)
-    if staff_data["Media Team"]:
-        staff_message += "\n**Media Team**\n"
-        staff_message += ", ".join(staff_data["Media Team"])
-    
-    # Add Tabling Team (if any exist)
-    if staff_data["Tabling Crew"]:
-        staff_message += "\n**Tabling Crew**\n"
-        staff_message += ", ".join(staff_data["Tabling Crew"])
-
-    # Add Stream Team (if any exist)
-    if staff_data["Stream Team"]:
-        staff_message += "\n**Media Team**\n"
-        staff_message += ", ".join(staff_data["Media Team"])
-
-    # Add Event Committee (if any exist)
-    if staff_data["Event Committee"]:
-        staff_message += "\n**Event Committee**\n"
-        staff_message += ", ".join(staff_data["Event Committee"])
-
-    # Add Tryout Coords (if any exist)
-    if staff_data["Tryout Coords"]:
-        staff_message += "\n**Tryout Coordinators**\n"
-        staff_message += ", ".join(staff_data["Tryout Coords"])
-    
-    # Add Wardens (if any exist)
-    if staff_data["Warden"]:
-        staff_message += "\n**Warden**\n"
-        staff_message += ", ".join(staff_data["Warden"])
-    
-    # Add Head Mods (if any exist)
-    if staff_data["Head Moderators"]:
-        staff_message += "\n**Head Moderators**\n"
-        staff_message += ", ".join(staff_data["Head Moderators"])
-
-    # Add Moderators (if any exist)
-    if staff_data["Moderators"]:
-        staff_message += "\n**Moderators**\n"
-        staff_message += ", ".join(staff_data["Moderators"])
+    warden_list = ", ".join(staff_data["Warden"]) if staff_data["Warden"] else "No Wardens"
+    staff_message += f"**\nWarden**: {warden_list}\n"    
 
     # Send the response
-    await interaction.response.send_message(content=staff_message)
+    await interaction.response.send_message(content=staff_message, ephemeral = True, view = view)
 
+#Finally, run the stupid bot and pray to God
 bot.run(os.getenv("MY_TOKEN"))
