@@ -46,7 +46,7 @@ ADMIN_ROLES = [esports_coord_role, warden_role]
 
 #This lists the current rosters of games as well as the max amount of teams per game. List appropriate games/colors below
 ALLOWED_GAMES = sorted([
-    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite Build", "Fortnite Zero Build" "Halo", "Marvel Rivals", "EACFB 25", "LoL", 
+    "Apex", "CS", "DBD", "Deadlock", "Dota", "FGC", "Fortnite Build", "Fortnite Zero Build", "Halo", "Marvel Rivals", "EACFB 25", "LoL", 
     "Overwatch", "R6", "Rocket League", "Smash Dawgs", "Smite", "Valorant", "Splatoon"
 ])
 ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
