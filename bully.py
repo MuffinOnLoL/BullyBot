@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 import calendar
 from discord.ui import Button, View
 from dotenv import load_dotenv
+import asyncio
 
 load_dotenv()
 intents = discord.Intents.default()
@@ -392,21 +393,77 @@ class GameSelectionView(View):
     def generate_game_buttons(self):
         self.clear_items()
         row = 0
-        for i, game in enumerate(ALLOWED_GAMES):
+        for i, game in enumerate(ALLOWED_GAMES + ["Maintenance", "Event"]):
             self.add_item(GameButton(game, row = row))
-            if (i + 1) % 5 == 0:
+            if (i + 1) % 5 == 0: 
                 row += 1
     
     async def handle_game_selection(self, interaction: discord.Interaction, game_name: str):
-        self.reservation_data["game"] = game_name
+        await interaction.response.defer(ephemeral=True)
+        if game_name == "Event":
+            #prompt name input if event was selected
+            await interaction.followup.send("You selected **Event**. Please type the event name below:", ephemeral = True)
+            
+            #Wait for response
+            def check(m):
+                return m.author == interaction.user and m.channel == interaction.channel
 
-        # Prepare reservation data and transition to team selection
-        team_view = TeamSelectionView(game_name, self.reservation_data)
+            try:
+                msg = await bot.wait_for("message", check=check, timeout=60)
+                self.reservation_data["game"] = msg.content #Set event name as game
+                self.reservation_data["team"] = "MSU Esports" #Default team for events
+                reservation_list = load_reservations()
+                reservation_list.append(self.reservation_data)
+                save_reservations(reservation_list)
 
-        await interaction.response.edit_message(
-            content=f"Game Selected: **{game_name}**\nNow select your **Team**:",
+                await interaction.followup.send(
+                    content=(
+                        f"**Event Scheduled by {interaction.user.mention}!**\n"
+                        f"Event: **{msg.content}**\n"
+                        f"Date: **{self.reservation_data['date']}**\n"
+                        f"Time: **{self.format_time(self.reservation_data['time'])}**\n"
+                        f"Duration: **{self.reservation_data['duration']} hours**\n"
+                        f"PCs Reserved: **{self.reservation_data['pcs']}**"
+                    ),
+                )
+            except asyncio.TimeoutError:
+                await interaction.followup.send(
+                    "Response timed out. Please reinput.", ephemeral=True
+                )
+
+        elif game_name == "Maintenance":
+            #Skip team selection for maintenance and proceed
+            self.reservation_data["game"] = "Maintenance"
+            self.reservation_data["team"] = "MSU Esports"  # Default team for maintenance
+            reservation_list = load_reservations()
+            reservation_list.append(self.reservation_data)
+            save_reservations(reservation_list)
+
+            await interaction.followup.send(
+                content=(
+                    f"**Maintenance Scheduled by {interaction.user.mention}!**\n"
+                    f"Date: **{self.reservation_data['date']}**\n"
+                    f"Time: **{self.format_time(self.reservation_data['time'])}**\n"
+                    f"Duration: **{self.reservation_data['duration']} hours**\n"
+                    f"PCs Reserved: **{self.reservation_data['pcs']}**"
+                ),
+            )
+        else:
+            #Regular games proceed as usual
+            self.reservation_data["game"] = game_name
+            team_view= TeamSelectionView(game_name,self.reservation_data)
+            await interaction.followup.edit_message(
+            interaction.message.id,
+            content=f"**{game_name}** selected. Please choose a team:",
             view=team_view,
         )
+
+    @staticmethod
+    def format_time(time_float: float):
+        hours = int(time_float)
+        minutes = int((time_float % 1) * 60)
+        return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
+        
 
 class TeamButton(Button):
     def __init__(self, team_name: str, row: int):
@@ -438,6 +495,26 @@ class TeamSelectionView(View):
         reservation_list.append(self.reservation_data)
         save_reservations(reservation_list)
 
+        # Try to edit the message or handle expired interaction
+        try:
+        # Check if interaction has already been responded to
+            if interaction.response.is_done():
+                await interaction.followup.send(
+                    "Reservation completed! A public confirmation has been posted.",
+                    ephemeral=True,
+                )
+            else:
+                await interaction.response.edit_message(
+                    content="Reservation completed! A public confirmation has been posted.",
+                    view=None,
+                )
+        except discord.errors.NotFound:
+            # Handle expired interaction
+            await interaction.followup.send(
+                "The interaction has expired. Please restart the process.", ephemeral=True
+            )
+            return
+
         await interaction.channel.send(
             content=(
                 f"**Reservation Confirmed by {interaction.user.mention}!**\n"
@@ -449,10 +526,6 @@ class TeamSelectionView(View):
                 f"Team: **{team_name}**"
             )
         )
-        await interaction.response.edit_message(
-            content="Reservation completed! A public confirmation has been posted.",
-            view=None,
-    )
 
     @staticmethod
     def format_time(time_float: float):
@@ -727,6 +800,23 @@ class ScheduleCalendarView(View):
         minutes = int((time_float % 1) * 60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
 
+    def generate_match_buttons(self):
+        self.clear_items()
+        start = self.page * self.page_size
+        end = start + self.page_size
+        current_matches = self.matches[start:end]
+
+        for idx, match in enumerate(current_matches):
+            self.add_item(MatchButton(match, start + idx))
+
+        #Navigation buttons if there are enough matches to navigate
+        if self.page > 0:
+            self.add_item(Button(label=" << Previous", style = discord.ButtonStyle.primary, row = 1, custom_id="prev_page"))
+        if end < len(self.matches):
+            self.add_item(Button(label="Next >>", style = discord.ButtonStyle.primary, row=1, custom_id="next_page"))
+
+
+
 class PagingRemoveView(View):
     def __init__(self, matches: list, remover: discord.Member, page: int = 0, page_size: int = 5):
         super().__init__(timeout=300)
@@ -745,28 +835,55 @@ class PagingRemoveView(View):
         for idx, match in enumerate(current_matches):
             self.add_item(MatchButton(match, start + idx))
 
-        #Navigation buttons if there are enough matches to navigate
+        # Navigation buttons if there are enough matches to navigate
         if self.page > 0:
-            self.add_item(Button(label=" << Previous", style = discord.ButtonStyle.primary, row = 1, custom_id="prev_page"))
+            self.add_item(Button(label="<< Previous", style=discord.ButtonStyle.primary, row=1, custom_id="prev_page"))
         if end < len(self.matches):
-            self.add_item(Button(label="Next >>", style = discord.ButtonStyle.primary, row=1, custom_id="next_page"))
+            self.add_item(Button(label="Next >>", style=discord.ButtonStyle.primary, row=1, custom_id="next_page"))
+
+    async def handle_match_selection(self, interaction: discord.Interaction, index: int):
+        # Handle match removal logic
+        removed_match = self.matches.pop(index)
+        reservation_list = load_reservations()
+        reservation_list.remove(removed_match)
+        save_reservations(reservation_list)
+
+        # Notify the channel about the removed match
+        await interaction.channel.send(
+            content=f"**{interaction.user.mention} removed the match:**\n"
+                    f"Game: **{removed_match['game']}**\n"
+                    f"Team: **{removed_match['team']}**\n"
+                    f"Date: **{removed_match['date']}**\n"
+                    f"Time: **{self.format_time(removed_match['time'])}**",
+        )
+
+        # Confirm removal to the user
+        await interaction.response.edit_message(content="Match removed successfully!", view=None)
 
     async def handle_nav(self, interaction: discord.Interaction, action: str):
         if action == "prev_page":
             self.page -= 1
         elif action == "next_page":
             self.page += 1
-        
+
         self.generate_match_buttons()
         await interaction.response.edit_message(
-            content = "Select a match to remove:",
-            view = self,
+            content="Select a match to remove:",
+            view=self,
         )
+
+    @staticmethod
+    def format_time(time_float: float):
+        hours = int(time_float)
+        minutes = int((time_float % 1) * 60)
+        return f"{hours}:{minutes:02}"
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         action = interaction.data.get("custom_id", "")
-        await self.handle_nav(interaction, action)
+        if action in {"prev_page", "next_page"}:
+            await self.handle_nav(interaction, action)
         return True
+
 
 class GameRosterView(View):
     def __init__(self, allowed_games):
@@ -1102,7 +1219,7 @@ async def schedule(interaction: discord.ApplicationContext):
     current_week = next((index for index, week in enumerate(cal) if current_day in week), 0)
 
     # Initialize the ScheduleCalendarView with the current date and reservations
-    view = ScheduleCalendarView(year=year, month=month, reservations=reservations, week_index=current_week)
+    view = ScheduleCalendarView(year, month, reservations, current_week)
     
     # Send the calendar view as a response
     await interaction.response.send_message(
