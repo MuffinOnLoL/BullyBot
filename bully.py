@@ -52,7 +52,7 @@ ALLOWED_GAMES = sorted([
 ])
 ALLOWED_TEAMS = ["Maroon", "White", "Black", "Gray"]
 
-
+#Creates the buttons for the schedule command
 class DayButton(Button):
     def __init__(self, day: int, month: int, year: int, row: int, label: str = None):
         custom_id = f"day_{day}_{month}_{year}"
@@ -78,6 +78,7 @@ class DayButton(Button):
             f"You selected: **{selected_date}**\nPlease select a **Start Time**:", view = time_selection_view, ephemeral=True
             )
 
+#Creates the view of buttons when using /schedule and controls their actions
 class CalendarView(View):
     def __init__(self, year: int, month: int, week_index: int = 0):
         super().__init__(timeout=180)
@@ -193,6 +194,7 @@ class CalendarView(View):
         await self.handle_callback(interaction, action)
         return True
 
+#Creates the buttons when selecting a start/end time
 class TimeButton(Button):
     def __init__(self, time_float: float, availability: str, row: int, available_pcs: int = None):
         hours = int(time_float)
@@ -217,6 +219,7 @@ class TimeButton(Button):
         selected_time = self.time_float
         await self.view.handle_time_selection(interaction, selected_time)
 
+#Controls the look and actions of the time buttons
 class timeSelectionView(View):
     def __init__(self, date: str, reservations: list, is_start_time: bool, start_time: float = None):
         super().__init__(timeout=300)
@@ -309,6 +312,7 @@ class timeSelectionView(View):
         minutes = int((time_float % 1) * 60) 
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M")
 
+#Creates the buttons to reserve # of pcs
 class PCButton(Button):
     def __init__(self, pcs: int, is_disabled: bool, row: int):
         super().__init__(
@@ -323,6 +327,7 @@ class PCButton(Button):
     async def callback(self, interaction: discord.Interaction):
         await self.view.handle_pc_selection(interaction, self.pcs)
 
+#Controls pc button functionality and looks
 class PCSelectionView(View):
     def __init__(self, date: str, start_time: float, duration: float, reservations:list):
         super().__init__(timeout=300)
@@ -376,6 +381,7 @@ class PCSelectionView(View):
         minutes = int((time_float%1)*60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M")
 
+#Creates buttons to select the appropriate game
 class GameButton(Button):
     def __init__(self, game_name: str, row: int):
         super().__init__(label=game_name, style=discord.ButtonStyle.primary, row = row)
@@ -384,6 +390,7 @@ class GameButton(Button):
     async def callback(self, interaction: discord.Interaction):
         await self.view.handle_game_selection(interaction, self.game_name)
 
+#Controls functionality of game buttons
 class GameSelectionView(View):
     def __init__(self, reservation_data:dict):
         super().__init__(timeout = 300)
@@ -463,8 +470,8 @@ class GameSelectionView(View):
         hours = int(time_float)
         minutes = int((time_float % 1) * 60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
-        
 
+#Creates buttons to select team colors
 class TeamButton(Button):
     def __init__(self, team_name: str, row: int):
         super().__init__(label = team_name, style=discord.ButtonStyle.primary, row = row)
@@ -473,6 +480,7 @@ class TeamButton(Button):
     async def callback(self, interaction: discord.Interaction):
         await self.view.handle_team_selection(interaction, self.team_name)
 
+#Controls team buttons functionality
 class TeamSelectionView(View):
     def __init__(self, selected_game: str, reservation_data: dict):
         super().__init__(timeout=300)
@@ -533,6 +541,7 @@ class TeamSelectionView(View):
         minutes = int((time_float % 1) * 60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M")
 
+#Creates the button for current matches
 class MatchButton(Button):
     def __init__(self, match:dict, index: int):
         super().__init__(label=f"{match['game']} - {match['team']} ({match['date']})", style = discord.ButtonStyle.danger)
@@ -548,6 +557,7 @@ class MatchButton(Button):
         minutes = int((time_float % 1)* 60)
         return f"{hours}:{minutes:02}"
 
+#Controls matches button functionality
 class MatchSelectionView(View):
     def __init__(self, matches: list, remover: discord.Member):
         super().__init__(timeout=300)
@@ -582,6 +592,7 @@ class MatchSelectionView(View):
         minutes = int((time_float % 1) * 60)
         return f"{hours}:{minutes:02}"
 
+#Creates buttons to select days from schedule
 class ScheduleDayButton(Button):
     def __init__(self, day: int, month: int, year: int, reservations: list, row: int, label: str = None):
         custom_id = f"schedule_day_{day}_{month}_{year}"
@@ -637,6 +648,7 @@ class ScheduleDayButton(Button):
                     view=match_view
                 )
 
+#Creates look of the matches and functionality
 class MatchListView(View):
     def __init__(self, date: str, matches: list):
         super().__init__(timeout=300)
@@ -671,6 +683,7 @@ class MatchListView(View):
         minutes = int((time_float % 1) * 60)
         return datetime.strptime(f"{hours}:{minutes:02}", "%H:%M").strftime("%I:%M %p")
 
+#Creates the look of actual schedule and functionality
 class ScheduleCalendarView(View):
     def __init__(self, year: int, month: int, reservations: list, week_index: int = 0):
         super().__init__(timeout=300)
@@ -815,8 +828,7 @@ class ScheduleCalendarView(View):
         if end < len(self.matches):
             self.add_item(Button(label="Next >>", style = discord.ButtonStyle.primary, row=1, custom_id="next_page"))
 
-
-
+#Creates and controls a paging system for remove command matches
 class PagingRemoveView(View):
     def __init__(self, matches: list, remover: discord.Member, page: int = 0, page_size: int = 5):
         super().__init__(timeout=300)
@@ -884,7 +896,7 @@ class PagingRemoveView(View):
             await self.handle_nav(interaction, action)
         return True
 
-
+#Creates a view for all current rosters and controls functionality
 class GameRosterView(View):
     def __init__(self, allowed_games):
         super().__init__(timeout=300)
@@ -896,6 +908,7 @@ class GameRosterView(View):
         for game in self.allowed_games:
             self.add_item(GameRosterButton(game))
 
+#Creates a button for all current rosters
 class GameRosterButton(Button):
     def __init__(self, game_name):
         super().__init__(label = game_name, style=discord.ButtonStyle.primary)
@@ -962,6 +975,7 @@ class GameRosterButton(Button):
 
         await interaction.response.send_message(content=roster_message, ephemeral=True)
 
+#Creates a paging system to view multiple pages of staff
 class StaffPagingView(View):
     def __init__(self, staff_data):
         super().__init__(timeout = 300)
@@ -1044,6 +1058,7 @@ class StaffPagingView(View):
         await self.handle_paging(interaction,action)
         return True
 
+#Checks to see if the user is one of the following roles
 def check_perm(allowed_roles):
     async def predicate(ctx: discord.ApplicationContext):
         user_roles = [role.id for role in ctx.author.roles]
@@ -1063,6 +1078,7 @@ def is_admin(allowed_roles):
         return False
     return commands.check(predicate)
 
+#Checks to see if the date is in the future and passes if so
 def validate_future_date(date_str):
     try:
         input_date = datetime.strptime(date_str, "%m-%d")
